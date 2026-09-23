@@ -46,6 +46,10 @@
     </div>
     <div class="flex items-center gap-3">
       <div class="hidden md:block text-xs text-gray-500 dark:text-gray-400" id="updatedLabel">Atualizado em 10/07/2026</div>
+      <div class="flex items-center bg-gray-100 dark:bg-gray-700 rounded-lg p-1 text-xs font-medium" id="siteToggle">
+        <button type="button" data-site="SPR4" class="site-btn px-3 py-1.5 rounded-md text-gray-500 dark:text-gray-400">SPR4</button>
+        <button type="button" data-site="SPR5" class="site-btn px-3 py-1.5 rounded-md bg-white dark:bg-gray-800 text-blue-700 dark:text-blue-400 shadow-sm">SPR5</button>
+      </div>
       <div class="flex items-center bg-gray-100 dark:bg-gray-700 rounded-lg p-1 text-xs font-medium" id="grainToggle">
         <button type="button" data-grain="dia" class="grain-btn px-3 py-1.5 rounded-md bg-white dark:bg-gray-800 text-blue-700 dark:text-blue-400 shadow-sm">Dia</button>
         <button type="button" data-grain="semana" class="grain-btn px-3 py-1.5 rounded-md text-gray-500 dark:text-gray-400">Semana</button>
@@ -167,7 +171,7 @@
           <summary class="cursor-pointer text-xs font-medium text-blue-600 dark:text-blue-400">Notas sobre os dados desta visão</summary>
           <div class="mt-2 text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
             Indicadores pedidos sem correspondência encontrada na base (aparecem como "sem dado"): <strong class="text-gray-700 dark:text-gray-300">Diferimento - SVC &amp; LM, SLA problem solver, Damaged at Station</strong>. "DOR" foi removido a pedido.<br>
-            Indicadores existentes na base mas não incluídos nesta lista: <strong class="text-gray-700 dark:text-gray-300">% Aduanas Realizadas, % Auditoria de lacres, CIA, COA, COAmod, Divergências em Aduana, DELAYED_AT_STATION, Promessa convertida H&amp;B</strong> — avise se quiser adicioná-los a algum grupo.<br>
+            Indicadores existentes na base mas não incluídos nesta lista: <strong class="text-gray-700 dark:text-gray-300">% Auditoria de lacres, Divergências em Aduana, DELAYED_AT_STATION, Promessa convertida H&amp;B</strong> — avise se quiser adicioná-los a algum grupo.<br>
             "Produtividade LMS GNP - SVC" foi associado a "Produtividade (GNP) SVC" (ambiguidade não resolvida anteriormente).
           </div>
         </details>
@@ -527,10 +531,11 @@ function getMeta(kpi) {
   return { meta: (ov.meta !== undefined && ov.meta !== null) ? ov.meta : base.meta, dir: ov.dir || base.dir };
 }
 function setMeta(kpi, field, value) { store.set(kpi, field, value); }
+function rowSite_(r) { return r.site || 'SPR5'; } // linhas antigas (antes da SPR4) não tem "site" — trata como SPR5
 function dataFor(kpi, grain) {
   return grain === 'dia'
-    ? daily.filter(r => r.kpi === kpi).sort((a,b)=>a.date.localeCompare(b.date))
-    : weekly.filter(r => r.kpi === kpi).sort((a,b)=>a.week.localeCompare(b.week));
+    ? daily.filter(r => r.kpi === kpi && rowSite_(r) === currentSite).sort((a,b)=>a.date.localeCompare(b.date))
+    : weekly.filter(r => r.kpi === kpi && rowSite_(r) === currentSite).sort((a,b)=>a.week.localeCompare(b.week));
 }
 function displayValue(kpi, row) {
   if (!row) return null;
@@ -643,9 +648,11 @@ function setAllNotes(newNotes) {
 }
 function updateUpdatedLabel_(dailyRows) {
   const el = document.getElementById('updatedLabel');
-  if (!el || !dailyRows || !dailyRows.length) return;
-  let maxDate = dailyRows[0].date;
-  for (const r of dailyRows) if (r.date > maxDate) maxDate = r.date;
+  if (!el) return;
+  const rows = (dailyRows || daily).filter(r => rowSite_(r) === currentSite);
+  if (!rows.length) return;
+  let maxDate = rows[0].date;
+  for (const r of rows) if (r.date > maxDate) maxDate = r.date;
   const [y, m, d] = maxDate.split('-');
   el.textContent = `Atualizado em ${d}/${m}/${y}`;
 }
@@ -763,14 +770,41 @@ function setGrain(g) {
 }
 document.querySelectorAll('.grain-btn').forEach(b => b.addEventListener('click', () => setGrain(b.dataset.grain)));
 
+function setSite(s) {
+  currentSite = s;
+  document.querySelectorAll('.site-btn').forEach(b => {
+    const active = b.dataset.site === s;
+    b.classList.toggle('bg-white', active);
+    b.classList.toggle('dark:bg-gray-800', active);
+    b.classList.toggle('shadow-sm', active);
+    b.classList.toggle('text-blue-700', active);
+    b.classList.toggle('dark:text-blue-400', active);
+    b.classList.toggle('text-gray-500', !active);
+    b.classList.toggle('dark:text-gray-400', !active);
+  });
+  try { localStorage.setItem('spr5_current_site', s); } catch(e) {}
+  updateUpdatedLabel_();
+  renderDiario();
+  renderKN();
+  renderOTR();
+  renderQualidade();
+  renderMetas();
+  renderCustomTable();
+  renderEvolucao();
+}
+document.querySelectorAll('.site-btn').forEach(b => b.addEventListener('click', () => setSite(b.dataset.site)));
+
 // ---------------- stat cards ----------------
 let currentGrain = 'dia';
+let currentSite = (function() {
+  try { return localStorage.getItem('spr5_current_site') || 'SPR5'; } catch(e) { return 'SPR5'; }
+})();
 function getPeriods(grain) {
   if (grain === 'dia') {
-    const dates = [...new Set(daily.map(r => r.date))].sort();
+    const dates = [...new Set(daily.filter(r => rowSite_(r) === currentSite).map(r => r.date))].sort();
     return dates.slice(-7).reverse();
   }
-  const weeks = [...new Set(weekly.map(r => r.week))].sort();
+  const weeks = [...new Set(weekly.filter(r => rowSite_(r) === currentSite).map(r => r.week))].sort();
   return weeks.slice(-6).reverse();
 }
 function periodField(grain) { return grain === 'dia' ? 'date' : 'week'; }
@@ -1464,6 +1498,16 @@ document.getElementById('otrBody').addEventListener('click', e => handleNoteCell
 document.getElementById('customBody').addEventListener('click', e => handleNoteCellClick(e, renderCustomTable));
 
 // init
+document.querySelectorAll('.site-btn').forEach(b => {
+  const active = b.dataset.site === currentSite;
+  b.classList.toggle('bg-white', active);
+  b.classList.toggle('dark:bg-gray-800', active);
+  b.classList.toggle('shadow-sm', active);
+  b.classList.toggle('text-blue-700', active);
+  b.classList.toggle('dark:text-blue-400', active);
+  b.classList.toggle('text-gray-500', !active);
+  b.classList.toggle('dark:text-gray-400', !active);
+});
 renderDiario();
 renderKN();
 renderOTR();
